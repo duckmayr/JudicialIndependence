@@ -1,17 +1,16 @@
-rm(list=ls())
-library(RCurl)
-m = 10
-data.impute <- list()
-for(i in 1:m){
-  dat_url = getURL(paste0('https://raw.githubusercontent.com/carlson9/JudicialIndependence/master/Data', i))
-  data.impute[[i]] = read.table(text = dat_url, row.names=NULL)
-}
-
+## Load required packages
 library(parallel)
 library(rstan)
-options(mc.cores = parallel::detectCores())
+library(boot)
+
+## Set options for parallel and rstan
+options(mc.cores = max(1, parallel::detectCores() - 1))
 rstan_options(auto_write = TRUE)
 
+## Read in data
+data_impute = lapply(paste0("Data", 1:10), read.table, row.names = NULL)
+
+## Define Stan model
 judicial = '
 data {
   int<lower=1> N;
@@ -41,57 +40,54 @@ model {
   for(n in 1:N) y[n] ~ normal(b0 + a[coun[n]] + X[n,]*B, sigmay);
 }
 '
-
 model = stan_model(model_code = judicial)
 
-interest.vars <- c('frac', 'contest', 'vol')
 
-library(boot)
-
-for(k in 1:3){
-  cl = makeCluster(20)
-  clusterExport(cl, varlist = list('k', 'model', 'data.impute', 'interest.vars'))
-  parLapply(cl, 1:m, function(i){
-    temp.data <- data.impute[[i]]
-    y <- boot::logit(temp.data$LJI)
-    n <- dim(temp.data)[1]
-    country.names <- unique(temp.data$country)
-    J <- length(country.names)
-    colonial <- character()
-    country <- numeric()
-    for(j in 1:J){
-      colonial[j] <- temp.data[temp.data$country == country.names[j], 'colonial'][1]
-      country[temp.data$country == country.names[j]] <- j
-    }
-    colonial <- as.factor(colonial)
-    colonial.esp <- ifelse(colonial == 2, 1, 0)
-    colonial.brit <- ifelse(colonial == 3, 1, 0)
-    colonial.port <- ifelse(colonial == 4, 1, 0)
-    colonial.fran <- ifelse(colonial == 5, 1, 0)
-    polity <- temp.data$polity
-    years <- temp.data$years
-    system <- temp.data$system
-    interest <- temp.data[, interest.vars[k]]
-    
-    to_stan = list(N = n,
-                   N_coun = J,
-                   y = y,
-                   coun = country,
-                   X = cbind(interest, polity, years, system),
-                   cln = cbind(colonial.esp,
-                               colonial.brit,
-                               colonial.port,
-                               colonial.fran))
-    
-    set.seed(100*k + i)
-    fit = rstan::sampling(model, data = to_stan, iter = 1500, chains = 2, cores = 2)
-    assign(paste0('fitSum.', k, '.', i),
-           rstan::summary(fit)$summary)
-    rm(fit)
-    write.csv(get(paste0('fitSum.', k, '.', i)), file = paste0('~/Dropbox/JudicialAnalysis/JudicialIndependence/fitSum.', k, '.', i, '.csv'))
-    
-    NULL
-  })
-  stopCluster(cl)
+predictors = c('frac', 'contest', 'vol')
+for ( k in 1:3 ) {
+    cat("Running model for predictor", predictors[k], "\n")
+    cl = makeCluster(20)
+    clusterExport(cl, varlist = list('k', 'model', 'data_impute', 'predictors'))
+    parLapply(cl, 1:length(data_impute), function(i){
+        tmp = data_impute[[i]]
+        y = boot::logit(tmp$LJI)
+        n = dim(tmp)[1]
+        countries = unique(tmp$country)
+        J = length(countries)
+        colonial = character(J)
+        country = numeric(J)
+        for ( j in 1:J ) {
+            colonial[j] = tmp[tmp$country == countries[j], 'colonial'][1]
+            country[tmp$country == countries[j]] = j
+        }
+        colonial = as.factor(colonial)
+        colonial_ES = ifelse(colonial == 2, 1, 0)
+        colonial_GB = ifelse(colonial == 3, 1, 0)
+        colonial_PT = ifelse(colonial == 4, 1, 0)
+        colonial_FR = ifelse(colonial == 5, 1, 0)
+        polity = tmp$polity
+        years = tmp$years
+        system = tmp$system
+        predictor = tmp[, predictors[k]]
+        stan_data = list(
+            N = n, N_coun = J,
+            y = y,
+            coun = country,
+            X = cbind(predictor, polity, years, system),
+            cln = cbind(colonial_ES, colonial_GB, colonial_PT, colonial_FR)
+        )
+        set.seed(100*k + i)
+        fit = rstan::sampling(
+            object = model,
+            data = stan_data,
+            iter = 1500,
+            chains = 2,
+            cores = 2
+        )
+        outfile = paste0('fitSum.', k, '.', i, '.csv')
+        write.csv(rstan::summary(fit)$summary, file = outfile)
+        rm(fit)
+        NULL
+    })
+    stopCluster(cl)
 }
-
