@@ -42,7 +42,7 @@ model {
 '
 model = stan_model(model_code = judicial)
 
-
+## Run models and save raw output
 predictors = c('frac', 'contest', 'vol')
 for ( k in 1:3 ) {
     cat("Running model for predictor", predictors[k], "\n")

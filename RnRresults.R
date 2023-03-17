@@ -4,7 +4,7 @@
 #'   1 corresponds to 'frac', 2 to 'contest', 3 to 'vol'
 #' @param n How many observations should we expect? (This changes based on lag)
 #' @param m How many imputed datasets are we looking for?
-#' @param lag How many DV lags are included?
+#' @param lag How many lags?
 #'
 #' @return A numeric matrix where each row is for a predictor, with columns
 #'   'mean', 'se', 't value', 'Pr(>|t|)', '2.5%', and '97.5%
